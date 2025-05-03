@@ -22,17 +22,31 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Switch,
+  FormControlLabel,
+  Divider,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, rgb, degrees } from 'pdf-lib'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import './App.css'
 
 interface BookletConfig {
   title: string
   startPage: number
   endPage: number
+  pageNumbers: boolean
+  pageNumberPosition: 'top' | 'bottom'
+  backCover: boolean
+  backCoverText: string
+  backFlipping: boolean
+  landscape: boolean
+  rtl: boolean
 }
 
 function App() {
@@ -44,10 +58,21 @@ function App() {
   const [bookletConfigs, setBookletConfigs] = useState<BookletConfig[]>([])
   const [totalPages, setTotalPages] = useState(0)
   const [isConfigDialogOpen, setIsConfigDialogOpen] = useState(false)
+  const [advancedOptions, setAdvancedOptions] = useState<Omit<BookletConfig, 'title' | 'startPage' | 'endPage'>>({
+    pageNumbers: false,
+    pageNumberPosition: 'bottom',
+    backCover: false,
+    backCoverText: '',
+    backFlipping: false,
+    landscape: false,
+    rtl: false
+  })
   const [newConfig, setNewConfig] = useState<BookletConfig>({
     title: '',
     startPage: 1,
-    endPage: 1
+    endPage: 1,
+    backCoverText: '',
+    ...advancedOptions
   })
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -76,7 +101,9 @@ function App() {
     setNewConfig({
       title: '',
       startPage: bookletConfigs.length > 0 ? bookletConfigs[bookletConfigs.length - 1].endPage + 1 : 1,
-      endPage: totalPages
+      endPage: totalPages,
+      backCoverText: '',
+      ...advancedOptions
     })
     setIsConfigDialogOpen(false)
   }
@@ -97,19 +124,22 @@ function App() {
       const srcPage = srcPdf.getPage(0)
       const { width, height } = srcPage.getSize()
       
-      // Calculate dimensions based on pages per sheet
-      const bookletWidth = width * (pagesPerSheet === 2 ? 2 : 2)
-      const bookletHeight = height * (pagesPerSheet === 2 ? 1 : 2)
+      // Calculate dimensions based on pages per sheet and orientation
+      const isLandscape = currentTab === 0 ? advancedOptions.landscape : bookletConfigs.some(config => config.landscape)
+      const bookletWidth = width * (pagesPerSheet === 2 ? 2 : 2) * (isLandscape ? 1 : 1)
+      const bookletHeight = height * (pagesPerSheet === 2 ? 1 : 2) * (isLandscape ? 1 : 1)
 
       // Calculate number of sheets needed
       const pagesPerSheetTotal = pagesPerSheet * 2 // Each sheet has 2 sides
 
       // If no specific booklet configs, generate one booklet with all pages
-      const configs = bookletConfigs.length > 0 ? bookletConfigs : [{
+      const configs = currentTab === 0 ? [{
         title: 'Complete Booklet',
         startPage: 1,
-        endPage: totalPages
-      }]
+        endPage: totalPages,
+        backCoverText: '',
+        ...advancedOptions
+      }] : bookletConfigs
 
       for (let configIndex = 0; configIndex < configs.length; configIndex++) {
         const config = configs[configIndex]
@@ -124,22 +154,40 @@ function App() {
         while (left < right) {
           if (pagesPerSheet === 2) {
             // 2-up layout
-            pageOrder.push(right)
-            pageOrder.push(left)
-            pageOrder.push(left + 1)
-            pageOrder.push(right - 1)
+            if (config.rtl) {
+              pageOrder.push(left)
+              pageOrder.push(right)
+              pageOrder.push(right - 1)
+              pageOrder.push(left + 1)
+            } else {
+              pageOrder.push(right)
+              pageOrder.push(left)
+              pageOrder.push(left + 1)
+              pageOrder.push(right - 1)
+            }
             left += 2
             right -= 2
           } else {
             // 4-up layout
-            pageOrder.push(right)
-            pageOrder.push(right - 1)
-            pageOrder.push(left)
-            pageOrder.push(left + 1)
-            pageOrder.push(left + 2)
-            pageOrder.push(left + 3)
-            pageOrder.push(right - 2)
-            pageOrder.push(right - 3)
+            if (config.rtl) {
+              pageOrder.push(left)
+              pageOrder.push(left + 1)
+              pageOrder.push(right)
+              pageOrder.push(right - 1)
+              pageOrder.push(left + 2)
+              pageOrder.push(left + 3)
+              pageOrder.push(right - 2)
+              pageOrder.push(right - 3)
+            } else {
+              pageOrder.push(right)
+              pageOrder.push(right - 1)
+              pageOrder.push(left)
+              pageOrder.push(left + 1)
+              pageOrder.push(left + 2)
+              pageOrder.push(left + 3)
+              pageOrder.push(right - 2)
+              pageOrder.push(right - 3)
+            }
             left += 4
             right -= 4
           }
@@ -172,15 +220,74 @@ function App() {
           
           if (pagesPerSheet === 2) {
             // 2-up layout
-            sheet.drawPage(embeddedPages[0], { x: 0, y: 0, width, height })
-            sheet.drawPage(embeddedPages[1], { x: width, y: 0, width, height })
+            sheet.drawPage(embeddedPages[0], { 
+              x: 0, 
+              y: 0, 
+              width, 
+              height,
+              rotate: config.landscape ? degrees(90) : undefined
+            })
+            sheet.drawPage(embeddedPages[1], { 
+              x: width, 
+              y: 0, 
+              width, 
+              height,
+              rotate: config.landscape ? degrees(90) : undefined
+            })
           } else {
             // 4-up layout (2x2 grid)
-            sheet.drawPage(embeddedPages[0], { x: 0, y: height, width, height })
-            sheet.drawPage(embeddedPages[1], { x: width, y: height, width, height })
-            sheet.drawPage(embeddedPages[2], { x: 0, y: 0, width, height })
-            sheet.drawPage(embeddedPages[3], { x: width, y: 0, width, height })
+            sheet.drawPage(embeddedPages[0], { 
+              x: 0, 
+              y: height, 
+              width, 
+              height,
+              rotate: config.landscape ? degrees(90) : undefined
+            })
+            sheet.drawPage(embeddedPages[1], { 
+              x: width, 
+              y: height, 
+              width, 
+              height,
+              rotate: config.landscape ? degrees(90) : undefined
+            })
+            sheet.drawPage(embeddedPages[2], { 
+              x: 0, 
+              y: 0, 
+              width, 
+              height,
+              rotate: config.landscape ? degrees(90) : undefined
+            })
+            sheet.drawPage(embeddedPages[3], { 
+              x: width, 
+              y: 0, 
+              width, 
+              height,
+              rotate: config.landscape ? degrees(90) : undefined
+            })
           }
+
+          // Add page numbers if enabled
+          if (config.pageNumbers) {
+            const pageNumber = Math.floor(i / pagesPerSheet) + 1
+            const y = config.pageNumberPosition === 'top' ? bookletHeight - 20 : 20
+            sheet.drawText(`${pageNumber}`, {
+              x: bookletWidth / 2,
+              y,
+              size: 12,
+              color: rgb(0, 0, 0)
+            })
+          }
+        }
+
+        // Add back cover if enabled
+        if (config.backCover) {
+          const backCover = newPdf.addPage([bookletWidth, bookletHeight])
+          backCover.drawText(config.backCoverText || config.title, {
+            x: bookletWidth / 2,
+            y: bookletHeight / 2,
+            size: 24,
+            color: rgb(0, 0, 0)
+          })
         }
 
         const pdfBytes = await newPdf.save()
@@ -201,6 +308,137 @@ function App() {
       console.error(err)
     }
   }
+
+  const renderAdvancedOptions = () => (
+    <Accordion>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Typography>Advanced Options</Typography>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack spacing={2}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={currentTab === 0 ? advancedOptions.pageNumbers : newConfig.pageNumbers}
+                onChange={e => {
+                  if (currentTab === 0) {
+                    setAdvancedOptions(prev => ({ ...prev, pageNumbers: e.target.checked }))
+                  } else {
+                    setNewConfig(prev => ({ ...prev, pageNumbers: e.target.checked }))
+                  }
+                }}
+              />
+            }
+            label="Add Page Numbers"
+          />
+          {(currentTab === 0 ? advancedOptions.pageNumbers : newConfig.pageNumbers) && (
+            <FormControl fullWidth>
+              <InputLabel>Page Number Position</InputLabel>
+              <Select
+                value={currentTab === 0 ? advancedOptions.pageNumberPosition : newConfig.pageNumberPosition}
+                label="Page Number Position"
+                onChange={e => {
+                  if (currentTab === 0) {
+                    setAdvancedOptions(prev => ({ 
+                      ...prev, 
+                      pageNumberPosition: e.target.value as 'top' | 'bottom' 
+                    }))
+                  } else {
+                    setNewConfig(prev => ({ 
+                      ...prev, 
+                      pageNumberPosition: e.target.value as 'top' | 'bottom' 
+                    }))
+                  }
+                }}
+              >
+                <MenuItem value="top">Top</MenuItem>
+                <MenuItem value="bottom">Bottom</MenuItem>
+              </Select>
+            </FormControl>
+          )}
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={currentTab === 0 ? advancedOptions.backCover : newConfig.backCover}
+                onChange={e => {
+                  if (currentTab === 0) {
+                    setAdvancedOptions(prev => ({ ...prev, backCover: e.target.checked }))
+                  } else {
+                    setNewConfig(prev => ({ ...prev, backCover: e.target.checked }))
+                  }
+                }}
+              />
+            }
+            label="Add Back Cover"
+          />
+          {(currentTab === 0 ? advancedOptions.backCover : newConfig.backCover) && (
+            <TextField
+              label="Back Cover Text"
+              value={currentTab === 0 ? advancedOptions.backCoverText : newConfig.backCoverText}
+              onChange={e => {
+                if (currentTab === 0) {
+                  setAdvancedOptions(prev => ({ ...prev, backCoverText: e.target.value }))
+                } else {
+                  setNewConfig(prev => ({ ...prev, backCoverText: e.target.value }))
+                }
+              }}
+              placeholder="Leave empty to use section title"
+              fullWidth
+            />
+          )}
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={currentTab === 0 ? advancedOptions.backFlipping : newConfig.backFlipping}
+                onChange={e => {
+                  if (currentTab === 0) {
+                    setAdvancedOptions(prev => ({ ...prev, backFlipping: e.target.checked }))
+                  } else {
+                    setNewConfig(prev => ({ ...prev, backFlipping: e.target.checked }))
+                  }
+                }}
+              />
+            }
+            label="Back Flipping"
+          />
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={currentTab === 0 ? advancedOptions.landscape : newConfig.landscape}
+                onChange={e => {
+                  if (currentTab === 0) {
+                    setAdvancedOptions(prev => ({ ...prev, landscape: e.target.checked }))
+                  } else {
+                    setNewConfig(prev => ({ ...prev, landscape: e.target.checked }))
+                  }
+                }}
+              />
+            }
+            label="Landscape Orientation"
+          />
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={currentTab === 0 ? advancedOptions.rtl : newConfig.rtl}
+                onChange={e => {
+                  if (currentTab === 0) {
+                    setAdvancedOptions(prev => ({ ...prev, rtl: e.target.checked }))
+                  } else {
+                    setNewConfig(prev => ({ ...prev, rtl: e.target.checked }))
+                  }
+                }}
+              />
+            }
+            label="Right-to-Left (RTL)"
+          />
+        </Stack>
+      </AccordionDetails>
+    </Accordion>
+  )
 
   return (
     <Container maxWidth="md">
@@ -252,6 +490,8 @@ function App() {
                   </Select>
                 </FormControl>
 
+                {renderAdvancedOptions()}
+
                 <Button 
                   variant="contained" 
                   color="primary"
@@ -278,7 +518,22 @@ function App() {
                     <ListItem key={index}>
                       <ListItemText
                         primary={config.title || `Section ${index + 1}`}
-                        secondary={`Pages ${config.startPage} to ${config.endPage}`}
+                        secondary={
+                          <Stack spacing={1}>
+                            <Typography variant="body2">
+                              Pages {config.startPage} to {config.endPage}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {[
+                                config.pageNumbers && 'Page Numbers',
+                                config.backCover && 'Back Cover',
+                                config.backFlipping && 'Back Flipping',
+                                config.landscape && 'Landscape',
+                                config.rtl && 'RTL'
+                              ].filter(Boolean).join(', ') || 'No special features'}
+                            </Typography>
+                          </Stack>
+                        }
                       />
                       <ListItemSecondaryAction>
                         <IconButton edge="end" onClick={() => handleRemoveBookletConfig(index)}>
@@ -315,10 +570,15 @@ function App() {
         )}
       </Box>
 
-      <Dialog open={isConfigDialogOpen} onClose={() => setIsConfigDialogOpen(false)}>
+      <Dialog 
+        open={isConfigDialogOpen} 
+        onClose={() => setIsConfigDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>Add Booklet Section</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
+          <Stack spacing={3} sx={{ mt: 1 }}>
             <TextField
               label="Section Title"
               value={newConfig.title}
@@ -341,6 +601,10 @@ function App() {
               inputProps={{ min: newConfig.startPage, max: totalPages }}
               fullWidth
             />
+
+            <Divider />
+
+            {renderAdvancedOptions()}
           </Stack>
         </DialogContent>
         <DialogActions>
