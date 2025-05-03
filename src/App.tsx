@@ -13,7 +13,7 @@ import {
   Select,
   MenuItem
 } from '@mui/material'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, rgb } from 'pdf-lib'
 import './App.css'
 
 function App() {
@@ -70,8 +70,21 @@ function App() {
       for (let i = 0; i < pageOrder.length; i += 2) {
         const indices = [pageOrder[i], pageOrder[i + 1]]
         const [srcIdxA, srcIdxB] = indices
-        const embeddedA = await newPdf.embedPage(srcPdf.getPage(srcIdxA < totalPages ? srcIdxA : totalPages - 1))
-        const embeddedB = await newPdf.embedPage(srcPdf.getPage(srcIdxB < totalPages ? srcIdxB : totalPages - 1))
+        // Helper to embed a real or blank page
+        const embedOrBlank = async (idx: number) => {
+          if (idx < totalPages) {
+            return await newPdf.embedPage(srcPdf.getPage(idx))
+          } else {
+            // Create a blank page in a temp PDF and embed it
+            const blankPdf = await PDFDocument.create()
+            const blankPage = blankPdf.addPage([width, height])
+            // Create a minimal content stream with a white background
+            blankPage.drawText('', { x: 0, y: 0 })
+            return await newPdf.embedPage(blankPage)
+          }
+        }
+        const embeddedA = await embedOrBlank(srcIdxA)
+        const embeddedB = await embedOrBlank(srcIdxB)
         // Create a new sheet (one side)
         const sheet = newPdf.addPage([bookletWidth, bookletHeight])
         sheet.drawPage(embeddedA, { x: 0, y: 0, width, height })
