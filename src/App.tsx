@@ -28,12 +28,14 @@ import {
   Divider,
   Accordion,
   AccordionSummary,
-  AccordionDetails
+  AccordionDetails,
+  Tooltip
 } from '@mui/material'
-import { PDFDocument, rgb, degrees } from 'pdf-lib'
+import { PDFDocument, rgb, degrees, PDFPage } from 'pdf-lib'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import './App.css'
 
 interface BookletConfig {
@@ -47,6 +49,8 @@ interface BookletConfig {
   backFlipping: boolean
   landscape: boolean
   rtl: boolean
+  watermark: boolean
+  watermarkText: string
 }
 
 function App() {
@@ -65,13 +69,14 @@ function App() {
     backCoverText: '',
     backFlipping: false,
     landscape: false,
-    rtl: false
+    rtl: false,
+    watermark: false,
+    watermarkText: 'BOOKLET MAKER'
   })
   const [newConfig, setNewConfig] = useState<BookletConfig>({
     title: '',
     startPage: 1,
     endPage: 1,
-    backCoverText: '',
     ...advancedOptions
   })
 
@@ -102,7 +107,6 @@ function App() {
       title: '',
       startPage: bookletConfigs.length > 0 ? bookletConfigs[bookletConfigs.length - 1].endPage + 1 : 1,
       endPage: totalPages,
-      backCoverText: '',
       ...advancedOptions
     })
     setIsConfigDialogOpen(false)
@@ -137,7 +141,6 @@ function App() {
         title: 'Complete Booklet',
         startPage: 1,
         endPage: totalPages,
-        backCoverText: '',
         ...advancedOptions
       }] : bookletConfigs
 
@@ -155,38 +158,70 @@ function App() {
           if (pagesPerSheet === 2) {
             // 2-up layout
             if (config.rtl) {
+              // RTL order
               pageOrder.push(left)
               pageOrder.push(right)
-              pageOrder.push(right - 1)
-              pageOrder.push(left + 1)
+              // For back pages, if back flipping is enabled, swap the order
+              if (config.backFlipping) {
+                pageOrder.push(left + 1)
+                pageOrder.push(right - 1)
+              } else {
+                pageOrder.push(right - 1)
+                pageOrder.push(left + 1)
+              }
             } else {
+              // LTR order
               pageOrder.push(right)
               pageOrder.push(left)
-              pageOrder.push(left + 1)
-              pageOrder.push(right - 1)
+              // For back pages, if back flipping is enabled, swap the order
+              if (config.backFlipping) {
+                pageOrder.push(left + 1)
+                pageOrder.push(right - 1)
+              } else {
+                pageOrder.push(right - 1)
+                pageOrder.push(left + 1)
+              }
             }
             left += 2
             right -= 2
           } else {
             // 4-up layout
             if (config.rtl) {
+              // RTL order
               pageOrder.push(left)
               pageOrder.push(left + 1)
               pageOrder.push(right)
               pageOrder.push(right - 1)
-              pageOrder.push(left + 2)
-              pageOrder.push(left + 3)
-              pageOrder.push(right - 2)
-              pageOrder.push(right - 3)
+              // For back pages, if back flipping is enabled, swap the order
+              if (config.backFlipping) {
+                pageOrder.push(left + 2)
+                pageOrder.push(left + 3)
+                pageOrder.push(right - 2)
+                pageOrder.push(right - 3)
+              } else {
+                pageOrder.push(right - 2)
+                pageOrder.push(right - 3)
+                pageOrder.push(left + 2)
+                pageOrder.push(left + 3)
+              }
             } else {
+              // LTR order
               pageOrder.push(right)
               pageOrder.push(right - 1)
               pageOrder.push(left)
               pageOrder.push(left + 1)
-              pageOrder.push(left + 2)
-              pageOrder.push(left + 3)
-              pageOrder.push(right - 2)
-              pageOrder.push(right - 3)
+              // For back pages, if back flipping is enabled, swap the order
+              if (config.backFlipping) {
+                pageOrder.push(left + 2)
+                pageOrder.push(left + 3)
+                pageOrder.push(right - 2)
+                pageOrder.push(right - 3)
+              } else {
+                pageOrder.push(right - 2)
+                pageOrder.push(right - 3)
+                pageOrder.push(left + 2)
+                pageOrder.push(left + 3)
+              }
             }
             left += 4
             right -= 4
@@ -209,68 +244,146 @@ function App() {
           }
         }
 
-        for (let i = 0; i < pageOrder.length; i += pagesPerSheet) {
-          const indices = pageOrder.slice(i, i + pagesPerSheet)
-          const embeddedPages = await Promise.all(
-            indices.map(idx => embedOrBlank(idx))
-          )
+        // Calculate total number of sheets needed
+        const totalSheets = Math.ceil(pageOrder.length / (pagesPerSheet * 2))
+        console.log('Total sheets:', totalSheets)
+        console.log('Pages per sheet:', pagesPerSheet)
+        console.log('Back flipping enabled:', config.backFlipping)
+        console.log('Page order:', pageOrder)
 
-          // Create a new sheet
-          const sheet = newPdf.addPage([bookletWidth, bookletHeight])
+        // Create all sheets upfront
+        const sheets = Array.from({ length: totalSheets * 2 }, () => 
+          newPdf.addPage([bookletWidth, bookletHeight])
+        )
+
+        // Process pages in pairs (front and back)
+        for (let i = 0; i < pageOrder.length; i += pagesPerSheet * 2) {
+          // Get pages for front and back of sheet
+          const frontIndices = pageOrder.slice(i, i + pagesPerSheet)
+          const backIndices = pageOrder.slice(i + pagesPerSheet, i + pagesPerSheet * 2)
           
+          console.log(`Sheet ${Math.floor(i / (pagesPerSheet * 2)) + 1}:`, {
+            frontIndices,
+            backIndices
+          })
+
+          const frontPages = await Promise.all(frontIndices.map(idx => embedOrBlank(idx)))
+          const backPages = await Promise.all(backIndices.map(idx => embedOrBlank(idx)))
+
+          // Calculate sheet indices
+          const sheetIndex = Math.floor(i / (pagesPerSheet * 2))
+          const frontSheetIndex = sheetIndex * 2
+          const backSheetIndex = frontSheetIndex + 1
+
           if (pagesPerSheet === 2) {
-            // 2-up layout
-            sheet.drawPage(embeddedPages[0], { 
+            // 2-up layout - Front
+            sheets[frontSheetIndex].drawPage(frontPages[0], { 
               x: 0, 
               y: 0, 
               width, 
               height,
               rotate: config.landscape ? degrees(90) : undefined
             })
-            sheet.drawPage(embeddedPages[1], { 
+            sheets[frontSheetIndex].drawPage(frontPages[1], { 
               x: width, 
               y: 0, 
               width, 
               height,
               rotate: config.landscape ? degrees(90) : undefined
             })
+            drawWatermark(sheets[frontSheetIndex], bookletWidth, bookletHeight)
+
+            // Back side
+            if (backPages.length > 0) {
+              const backRotation = config.landscape ? degrees(90) : undefined
+              sheets[backSheetIndex].drawPage(backPages[0], { 
+                x: 0, 
+                y: 0, 
+                width, 
+                height,
+                rotate: backRotation
+              })
+              sheets[backSheetIndex].drawPage(backPages[1], { 
+                x: width, 
+                y: 0, 
+                width, 
+                height,
+                rotate: backRotation
+              })
+              drawWatermark(sheets[backSheetIndex], bookletWidth, bookletHeight)
+            }
           } else {
-            // 4-up layout (2x2 grid)
-            sheet.drawPage(embeddedPages[0], { 
+            // 4-up layout - Front
+            sheets[frontSheetIndex].drawPage(frontPages[0], { 
               x: 0, 
               y: height, 
               width, 
               height,
               rotate: config.landscape ? degrees(90) : undefined
             })
-            sheet.drawPage(embeddedPages[1], { 
+            sheets[frontSheetIndex].drawPage(frontPages[1], { 
               x: width, 
               y: height, 
               width, 
               height,
               rotate: config.landscape ? degrees(90) : undefined
             })
-            sheet.drawPage(embeddedPages[2], { 
+            sheets[frontSheetIndex].drawPage(frontPages[2], { 
               x: 0, 
               y: 0, 
               width, 
               height,
               rotate: config.landscape ? degrees(90) : undefined
             })
-            sheet.drawPage(embeddedPages[3], { 
+            sheets[frontSheetIndex].drawPage(frontPages[3], { 
               x: width, 
               y: 0, 
               width, 
               height,
               rotate: config.landscape ? degrees(90) : undefined
             })
+            drawWatermark(sheets[frontSheetIndex], bookletWidth, bookletHeight)
+
+            // Back side
+            if (backPages.length > 0) {
+              const backRotation = config.landscape ? degrees(90) : undefined
+              sheets[backSheetIndex].drawPage(backPages[0], { 
+                x: 0, 
+                y: height, 
+                width, 
+                height,
+                rotate: backRotation
+              })
+              sheets[backSheetIndex].drawPage(backPages[1], { 
+                x: width, 
+                y: height, 
+                width, 
+                height,
+                rotate: backRotation
+              })
+              sheets[backSheetIndex].drawPage(backPages[2], { 
+                x: 0, 
+                y: 0, 
+                width, 
+                height,
+                rotate: backRotation
+              })
+              sheets[backSheetIndex].drawPage(backPages[3], { 
+                x: width, 
+                y: 0, 
+                width, 
+                height,
+                rotate: backRotation
+              })
+              drawWatermark(sheets[backSheetIndex], bookletWidth, bookletHeight)
+            }
           }
 
           // Add page numbers if enabled
           if (config.pageNumbers) {
             const pageNumber = Math.floor(i / pagesPerSheet) + 1
             const y = config.pageNumberPosition === 'top' ? bookletHeight - 20 : 20
-            sheet.drawText(`${pageNumber}`, {
+            sheets[frontSheetIndex].drawText(`${pageNumber}`, {
               x: bookletWidth / 2,
               y,
               size: 12,
@@ -307,6 +420,32 @@ function App() {
       setError('Error processing PDF file')
       console.error(err)
     }
+  }
+
+  const drawWatermark = (page: PDFPage, width: number, height: number) => {
+    const config = currentTab === 0 ? advancedOptions : newConfig
+    if (!config.watermark) return
+
+    // Calculate font size based on page dimensions (smaller than before)
+    const fontSize = Math.min(width, height) / 40
+
+    // Draw the watermark text
+    const text = config.watermarkText
+    const textWidth = text.length * (fontSize * 0.6) // Approximate width based on character count and font size
+    const textHeight = fontSize
+
+    // Position in bottom right with padding
+    const padding = fontSize * 2
+    const x = width - textWidth - padding
+    const y = padding
+
+    page.drawText(text, {
+      x,
+      y,
+      size: fontSize,
+      color: rgb(0.8, 0.8, 0.8), // Light gray color
+      opacity: 0.3 // Semi-transparent
+    })
   }
 
   const renderAdvancedOptions = () => (
@@ -401,7 +540,14 @@ function App() {
                 }}
               />
             }
-            label="Back Flipping"
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                Back Flipping
+                <Tooltip title="When enabled, the back side of each sheet will be flipped horizontally. This is useful for double-sided printing where you want the content to be readable when flipping the page like a book.">
+                  <HelpOutlineIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                </Tooltip>
+              </Box>
+            }
           />
 
           <FormControlLabel
@@ -417,7 +563,14 @@ function App() {
                 }}
               />
             }
-            label="Landscape Orientation"
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                Landscape Orientation
+                <Tooltip title="When enabled, pages will be rotated 90 degrees clockwise. This is useful for landscape-oriented content that needs to be printed in portrait orientation.">
+                  <HelpOutlineIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                </Tooltip>
+              </Box>
+            }
           />
 
           <FormControlLabel
@@ -433,8 +586,53 @@ function App() {
                 }}
               />
             }
-            label="Right-to-Left (RTL)"
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                Right-to-Left (RTL)
+                <Tooltip title="When enabled, the page order will be reversed for right-to-left languages. This is useful for languages like Arabic, Hebrew, or Persian where content flows from right to left.">
+                  <HelpOutlineIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                </Tooltip>
+              </Box>
+            }
           />
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={currentTab === 0 ? advancedOptions.watermark : newConfig.watermark}
+                onChange={e => {
+                  if (currentTab === 0) {
+                    setAdvancedOptions(prev => ({ ...prev, watermark: e.target.checked }))
+                  } else {
+                    setNewConfig(prev => ({ ...prev, watermark: e.target.checked }))
+                  }
+                }}
+              />
+            }
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                Watermark
+                <Tooltip title="Add a subtle watermark to each page. Disable for a cleaner look.">
+                  <HelpOutlineIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                </Tooltip>
+              </Box>
+            }
+          />
+          {(currentTab === 0 ? advancedOptions.watermark : newConfig.watermark) && (
+            <TextField
+              label="Watermark Text"
+              value={currentTab === 0 ? advancedOptions.watermarkText : newConfig.watermarkText}
+              onChange={e => {
+                if (currentTab === 0) {
+                  setAdvancedOptions(prev => ({ ...prev, watermarkText: e.target.value }))
+                } else {
+                  setNewConfig(prev => ({ ...prev, watermarkText: e.target.value }))
+                }
+              }}
+              placeholder="Enter watermark text"
+              fullWidth
+            />
+          )}
         </Stack>
       </AccordionDetails>
     </Accordion>
@@ -568,6 +766,35 @@ function App() {
             {success}
           </Alert>
         )}
+
+        {/* Banner Ad */}
+        <Paper 
+          elevation={0} 
+          sx={{ 
+            mt: 4, 
+            p: 2, 
+            bgcolor: 'background.paper',
+            borderTop: 1,
+            borderColor: 'divider',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2
+          }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Made with ❤️ by Booklet Maker
+          </Typography>
+          <Button 
+            variant="outlined" 
+            size="small"
+            href="https://bookletmaker.com/pro"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Upgrade to Pro
+          </Button>
+        </Paper>
       </Box>
 
       <Dialog 
