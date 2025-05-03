@@ -45,50 +45,79 @@ function App() {
       const totalPages = srcPdf.getPageCount()
       const srcPage = srcPdf.getPage(0)
       const { width, height } = srcPage.getSize()
-      // Auto paper size: width is doubled
-      const bookletWidth = width * 2
-      const bookletHeight = height
+      
+      // Calculate dimensions based on pages per sheet
+      const bookletWidth = width * (pagesPerSheet === 2 ? 2 : 2)
+      const bookletHeight = height * (pagesPerSheet === 2 ? 1 : 2)
 
       // Calculate number of sheets needed
-      const pagesPerSheet = 2 // Each sheet has 4 pages (2 per side)
-      const bookletPages = Math.ceil(totalPages / 4) * 4 // Pad to multiple of 4
+      const pagesPerSheetTotal = pagesPerSheet * 2 // Each sheet has 2 sides
+      const bookletPages = Math.ceil(totalPages / pagesPerSheetTotal) * pagesPerSheetTotal
+
+      const newPdf = await PDFDocument.create()
+
+      // Helper to embed a real or blank page
+      const embedOrBlank = async (idx: number) => {
+        if (idx < totalPages) {
+          return await newPdf.embedPage(srcPdf.getPage(idx))
+        } else {
+          // Create a blank page in a temp PDF and embed it
+          const blankPdf = await PDFDocument.create()
+          const blankPage = blankPdf.addPage([width, height])
+          // Create a minimal content stream with a white background
+          blankPage.drawText('', { x: 0, y: 0 })
+          return await newPdf.embedPage(blankPage)
+        }
+      }
 
       // Compute booklet page order (imposition)
       const pageOrder: number[] = []
       let left = 0
       let right = bookletPages - 1
       while (left < right) {
-        pageOrder.push(right)
-        pageOrder.push(left)
-        pageOrder.push(left + 1)
-        pageOrder.push(right - 1)
-        left += 2
-        right -= 2
+        if (pagesPerSheet === 2) {
+          // 2-up layout
+          pageOrder.push(right)
+          pageOrder.push(left)
+          pageOrder.push(left + 1)
+          pageOrder.push(right - 1)
+          left += 2
+          right -= 2
+        } else {
+          // 4-up layout
+          pageOrder.push(right)
+          pageOrder.push(right - 1)
+          pageOrder.push(left)
+          pageOrder.push(left + 1)
+          pageOrder.push(left + 2)
+          pageOrder.push(left + 3)
+          pageOrder.push(right - 2)
+          pageOrder.push(right - 3)
+          left += 4
+          right -= 4
+        }
       }
 
-      const newPdf = await PDFDocument.create()
-      for (let i = 0; i < pageOrder.length; i += 2) {
-        const indices = [pageOrder[i], pageOrder[i + 1]]
-        const [srcIdxA, srcIdxB] = indices
-        // Helper to embed a real or blank page
-        const embedOrBlank = async (idx: number) => {
-          if (idx < totalPages) {
-            return await newPdf.embedPage(srcPdf.getPage(idx))
-          } else {
-            // Create a blank page in a temp PDF and embed it
-            const blankPdf = await PDFDocument.create()
-            const blankPage = blankPdf.addPage([width, height])
-            // Create a minimal content stream with a white background
-            blankPage.drawText('', { x: 0, y: 0 })
-            return await newPdf.embedPage(blankPage)
-          }
-        }
-        const embeddedA = await embedOrBlank(srcIdxA)
-        const embeddedB = await embedOrBlank(srcIdxB)
-        // Create a new sheet (one side)
+      for (let i = 0; i < pageOrder.length; i += pagesPerSheet) {
+        const indices = pageOrder.slice(i, i + pagesPerSheet)
+        const embeddedPages = await Promise.all(
+          indices.map(idx => embedOrBlank(idx))
+        )
+
+        // Create a new sheet
         const sheet = newPdf.addPage([bookletWidth, bookletHeight])
-        sheet.drawPage(embeddedA, { x: 0, y: 0, width, height })
-        sheet.drawPage(embeddedB, { x: width, y: 0, width, height })
+        
+        if (pagesPerSheet === 2) {
+          // 2-up layout
+          sheet.drawPage(embeddedPages[0], { x: 0, y: 0, width, height })
+          sheet.drawPage(embeddedPages[1], { x: width, y: 0, width, height })
+        } else {
+          // 4-up layout (2x2 grid)
+          sheet.drawPage(embeddedPages[0], { x: 0, y: height, width, height })
+          sheet.drawPage(embeddedPages[1], { x: width, y: height, width, height })
+          sheet.drawPage(embeddedPages[2], { x: 0, y: 0, width, height })
+          sheet.drawPage(embeddedPages[3], { x: width, y: 0, width, height })
+        }
       }
 
       const pdfBytes = await newPdf.save()
